@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:8000';
-const WS_URL = 'ws://localhost:8000/ws';
+// Change these lines at the top of your App.jsx
+const API_BASE_URL = 'https://workplace-processor.onrender.com';
+const WS_URL = 'wss://workplace-processor.onrender.com/ws';
 
 export default function App() {
   const [input, setInput] = useState('');
