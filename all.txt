@@ -1,0 +1,402 @@
+# Complete Setup Instructions
+
+1. BACKEND SETUP
+---------------
+First, create and set up the backend directory:
+
+```bash
+# Create project directory
+mkdir workplace-processor
+cd workplace-processor
+
+# Create backend directory
+mkdir backend
+cd backend
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Create requirements.txt
+echo "fastapi==0.109.1
+uvicorn==0.27.0
+httpx==0.26.0" > requirements.txt
+
+# Install requirements
+pip install -r requirements.txt
+```
+
+Create backend.py:
+```python
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
+import uvicorn
+import json
+import hmac
+import hashlib
+import httpx
+import re
+from typing import List, Dict, Any
+
+def clean_message_content(message: str) -> str:
+    if not message:
+        return message
+    
+    parts = message.split("Link:")
+    main_content = parts[0]
+    
+    real_urls = re.findall(r'https://(?:www\.)?[^/\s]+/[^\s\)\]]+', message)
+    original_url = None
+    if real_urls:
+        original_url = real_urls[0]
+        lines = [line.strip() for line in main_content.split('\n') if line.strip()]
+        if original_url:
+            lines.append(f"Link: {original_url}")
+        return '\n'.join(lines)
+    
+    return message
+
+app = FastAPI(title="Workplace Post Processor API")
+
+# Root endpoint for API documentation
+@app.get("/")
+async def root():
+    return {
+        "message": "Workplace Post Processor API",
+        "endpoints": {
+            "process_post": "/process-post/{post_id}",
+            "webhook": "/webhook"
+        },
+        "docs": "/docs"
+    }
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Configuration
+VERIFY_TOKEN = "my_test_token_123"
+APP_SECRET = "5285ce95e976c196236079f01b99a446"
+WORKPLACE_ACCESS_TOKEN = "DQWRLN3FEV3RtRU5ZAMWJ2QzRzdDhzRlY0N2EyZAHZAnemNhdXYybnVUT1lmMWtUcTZAhdkdROEMwZAklpcXBBTEVEU2plRklDR2pqZA3ltM3IzUVVxNmpENFJlZAERBUjI0dlp3cEVjQkdaeC1xMl9YRDdlbnpTM1VrYUduejlMeDVXakxyU1dlWlBlUENvWXNhclVabU1zOGg3OEM0VkhMN2IwbkczaUx2U21GT2QyTHJvXzR0QUkyMlFuZAWdQODlPM3pGR01qd2Y4Vl92MEZABOFJrUE5nNAZDZD"
+
+WORKPLACE_GRAPH_API = "https://graph.workplace.com"
+AIRTABLE_WEBHOOK = "https://hooks.airtable.com/workflows/v1/genericWebhook/app7kliNTFQP7pa1K/wflXBEgbGhrtUhwTR/wtrB3LOq85sVgMSm0"
+
+async def get_post_details(post_id: str) -> Dict:
+    fields = [
+        "id", "created_time", "description", "feed_targeting", "from", 
+        "icon", "is_hidden", "link", "message", "message_tags", 
+        "name", "object_id", "parent_id", "permalink_url", "picture", 
+        "place", "properties", "shares", "source"
+    ]
+    
+    url = f"{WORKPLACE_GRAPH_API}/{post_id}"
+    params = {
+        "fields": ",".join(fields),
+        "access_token": WORKPLACE_ACCESS_TOKEN
+    }
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, params=params)
+        print(f"\n=== Workplace Graph API Response ===")
+        print(f"Status: {response.status_code}")
+        print(f"Response body: {response.text}")
+        
+        if response.status_code == 200:
+            post_data = response.json()
+            if 'message' in post_data:
+                post_data['message'] = clean_message_content(post_data['message'])
+            return post_data
+        else:
+            print(f"Error getting post details: {response.text}")
+            return None
+
+async def send_to_airtable_webhook(post_data: Dict) -> bool:
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            AIRTABLE_WEBHOOK,
+            json=post_data
+        )
+        print("\n=== Airtable Webhook Response ===")
+        print(f"Status: {response.status_code}")
+        print(f"Response body: {response.text}")
+        
+        return response.status_code == 200
+
+@app.get("/process-post/{post_id}")
+async def process_post(post_id: str):
+    post_details = await get_post_details(post_id)
+    
+    if post_details:
+        success = await send_to_airtable_webhook(post_details)
+        if success:
+            return {
+                "status": "success",
+                "message": "Successfully processed post",
+                "data": post_details
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to forward to Airtable webhook"
+            }
+    
+    return {
+        "status": "error",
+        "message": "Failed to get post details from Workplace"
+    }
+
+@app.post("/webhook")
+async def webhook_handler(request: Request):
+    body = await request.body()
+    headers = dict(request.headers)
+    
+    received_signature = headers.get('x-hub-signature-256', '')
+    expected_signature = 'sha256=' + hmac.new(
+        APP_SECRET.encode('utf-8'),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+    
+    if not hmac.compare_digest(received_signature, expected_signature):
+        print("⚠️ Signature mismatch!")
+        return Response(status_code=403)
+    
+    try:
+        workplace_data = json.loads(body)
+        print("\n=== Webhook Received ===")
+        print(json.dumps(workplace_data, indent=2))
+        
+        changes = workplace_data.get('entry', [{}])[0].get('changes', [{}])[0]
+        post_data = changes.get('value', {})
+        verb = post_data.get('verb')
+        
+        if verb == 'delete':
+            print(f"Skipping webhook - Delete event received for post {post_data.get('post_id')}")
+            return Response(status_code=200)
+        
+        post_id = post_data.get('post_id', '').split('_')[-1]
+        
+        if not post_id:
+            print("⚠️ No post ID found in webhook data")
+            return Response(status_code=400)
+        
+        post_details = await get_post_details(post_id)
+        
+        if post_details:
+            success = await send_to_airtable_webhook(post_details)
+            if success:
+                print("✅ Successfully forwarded post to Airtable")
+            else:
+                print("❌ Failed to forward to Airtable webhook")
+        else:
+            print("❌ Failed to get post details from Workplace")
+
+    except Exception as e:
+        print(f"Error processing webhook: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+    return {"status": "received"}
+
+if __name__ == "__main__":
+    print("\n=== Server Configuration ===")
+    print("Server running at: http://localhost:8000")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+2. FRONTEND SETUP
+----------------
+In a new terminal, create and set up the frontend:
+
+```bash
+# Navigate back to project root
+cd ..
+
+# Create new React project
+npm create vite@latest frontend -- --template react
+cd frontend
+
+# Install dependencies
+npm install
+```
+
+Update src/App.jsx:
+```jsx
+import React, { useState } from 'react';
+import './App.css';
+
+const API_BASE_URL = 'http://localhost:8000';
+
+export default function App() {
+  const [input, setInput] = useState('');
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const extractPostId = (input) => {
+    if (input.includes('workplace.com')) {
+      const matches = input.match(/\/posts\/(\d+)/);
+      return matches ? matches[1] : input;
+    }
+    if (input.includes('_')) {
+      return input.split('_').pop();
+    }
+    return input;
+  };
+
+  const processPost = async () => {
+    setLoading(true);
+    setStatus(null);
+    setResult(null);
+
+    try {
+      const postId = extractPostId(input);
+      const response = await fetch(`${API_BASE_URL}/process-post/${postId}`);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to process post');
+      }
+
+      if (data.status === 'success') {
+        setResult(data.data);
+        setStatus({
+          type: 'success',
+          message: 'Post processed and sent to Airtable successfully!'
+        });
+      } else {
+        throw new Error(data.message || 'Failed to process post');
+      }
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: error.message || 'An error occurred while processing the post'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
+      <h1 style={{ marginBottom: '20px' }}>Workplace Post Processor</h1>
+      
+      <div style={{ marginBottom: '20px' }}>
+        <label style={{ display: 'block', marginBottom: '8px' }}>
+          Enter Workplace Post ID or Permalink:
+        </label>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Enter post ID or full permalink..."
+          style={{
+            width: '100%',
+            padding: '8px',
+            border: '1px solid #ccc',
+            borderRadius: '4px'
+          }}
+        />
+        <p style={{ fontSize: '14px', color: '#666', marginTop: '4px' }}>
+          Accepts: Full permalink, post ID, or group_id_post_id format
+        </p>
+      </div>
+
+      <button
+        onClick={processPost}
+        disabled={!input || loading}
+        style={{
+          width: '100%',
+          padding: '10px',
+          backgroundColor: loading || !input ? '#ccc' : '#0066cc',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: loading || !input ? 'not-allowed' : 'pointer'
+        }}
+      >
+        {loading ? 'Processing...' : 'Process Post'}
+      </button>
+
+      {status && (
+        <div
+          style={{
+            padding: '12px',
+            marginTop: '20px',
+            backgroundColor: status.type === 'error' ? '#fee2e2' : '#dcfce7',
+            borderRadius: '4px'
+          }}
+        >
+          <p style={{ color: status.type === 'error' ? '#dc2626' : '#15803d' }}>
+            {status.message}
+          </p>
+        </div>
+      )}
+
+      {result && (
+        <div style={{ marginTop: '20px' }}>
+          <h3 style={{ marginBottom: '10px' }}>Post Details:</h3>
+          <div
+            style={{
+              backgroundColor: '#f8f9fa',
+              padding: '12px',
+              borderRadius: '4px',
+              overflow: 'auto'
+            }}
+          >
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+Update src/App.css:
+```css
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f5;
+}
+
+* {
+  box-sizing: border-box;
+}
+```
+
+3. RUNNING THE APPLICATION
+-------------------------
+1. Start the backend (in backend directory):
+```bash
+cd backend
+source venv/bin/activate
+python backend.py
+```
+
+2. Start the frontend (in frontend directory, new terminal):
+```bash
+cd frontend
+npm run dev
+```
+
+The application will be available at:
+- Backend: http://localhost:8000
+- Frontend: http://localhost:5173
+
+You can now:
+1. Enter a Workplace post ID or permalink
+2. Click "Process Post"
+3. See the results or any error messages
