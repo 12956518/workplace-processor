@@ -1,0 +1,26 @@
+# When this workflow runs
+on:
+  push:
+    branches: [ main ]  # Triggers whenever you push to the main branch
+
+jobs:
+  build-and-deploy:     # Name of the job
+    runs-on: ubuntu-latest  # Uses Ubuntu as the environment
+    steps:
+      # Step 1: Get your code
+      - name: Checkout 🛎️
+        uses: actions/checkout@v2    # Downloads your repo content
+
+      # Step 2: Build your frontend
+      - name: Install and Build 🔧
+        run: |
+          cd frontend              # Go to frontend directory
+          npm install             # Install dependencies
+          npm run build          # Build your React app (creates dist folder)
+
+      # Step 3: Deploy to GitHub Pages
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@4.1.4  # Uses a pre-made action
+        with:
+          branch: gh-pages    # Creates/updates gh-pages branch
+          folder: frontend/dist   # Takes your built files from dist folder
