@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-// Change these lines at the top of your App.jsx
+// Change these based on your actual backend URL
 const API_BASE_URL = 'https://workplace-processor.onrender.com';
 const WS_URL = 'wss://workplace-processor.onrender.com/ws';
 
@@ -11,10 +11,11 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [webhooks, setWebhooks] = useState([]);
+  const [verificationToken, setVerificationToken] = useState('');
   const wsRef = useRef(null);
 
   useEffect(() => {
-    // Connect to WebSocket
+    // WebSocket connection logic (unchanged from previous implementation)
     const connectWebSocket = () => {
       const ws = new WebSocket(WS_URL);
       
@@ -29,7 +30,6 @@ export default function App() {
 
       ws.onclose = () => {
         console.log('WebSocket Disconnected');
-        // Attempt to reconnect after 3 seconds
         setTimeout(connectWebSocket, 3000);
       };
 
@@ -38,7 +38,6 @@ export default function App() {
 
     connectWebSocket();
 
-    // Cleanup on unmount
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -46,17 +45,15 @@ export default function App() {
     };
   }, []);
 
+  // Existing methods from previous implementation
   const extractPostId = (input) => {
-    // Handle full Workplace URLs with permalink format
     if (input.includes('workplace.com')) {
       const matches = input.match(/\/permalink\/(\d+)/);
       return matches ? matches[1] : input;
     }
-    // Handle group_id_post_id format
     if (input.includes('_')) {
       return input.split('_').pop();
     }
-    // Handle direct post IDs
     return input;
   };
 
@@ -93,6 +90,46 @@ export default function App() {
     }
   };
 
+  // New webhook verification method
+  const verifyWebhook = async () => {
+    if (!verificationToken) {
+      setStatus({
+        type: 'error',
+        message: 'Please enter a verification token'
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/verify-webhook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ verify_token: verificationToken })
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.verified) {
+        setStatus({
+          type: 'success',
+          message: 'Webhook verification successful!'
+        });
+      } else {
+        setStatus({
+          type: 'error',
+          message: data.message || 'Webhook verification failed.'
+        });
+      }
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: 'Error during webhook verification.'
+      });
+    }
+  };
+
   const formatDate = (isoString) => {
     return new Date(isoString).toLocaleString();
   };
@@ -104,9 +141,7 @@ export default function App() {
           <h1 className="title">Workplace Post Processor</h1>
           
           <div className="input-group">
-            <label>
-              Enter Workplace Post ID or Permalink:
-            </label>
+            <label>Enter Workplace Post ID or Permalink:</label>
             <input
               type="text"
               value={input}
@@ -142,6 +177,26 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
+
+        <div className="card webhook-verification-card">
+          <h2 className="title">Webhook Verification</h2>
+          <div className="input-group">
+            <label>Verification Token:</label>
+            <input
+              type="text"
+              value={verificationToken}
+              onChange={(e) => setVerificationToken(e.target.value)}
+              placeholder="Enter Workplace webhook verification token"
+            />
+            <button 
+              onClick={verifyWebhook}
+              disabled={!verificationToken}
+              className={`verify-button ${!verificationToken ? 'disabled' : ''}`}
+            >
+              Verify Webhook
+            </button>
+          </div>
         </div>
 
         <div className="card webhook-card">
