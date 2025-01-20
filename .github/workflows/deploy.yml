@@ -1,26 +1,44 @@
-name: Deploy to GitHub Pages
-
+# When this workflow runs
 on:
   push:
-    branches: [ main ]
-
-permissions:
-  contents: write # Add this line for permissions
+    branches: [ main ]  # Triggers whenever you push to the main branch
+  repository_dispatch:  # Allows external webhook triggers
+    types: [webhook]
 
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
+  build-and-deploy:     # Name of the job
+    runs-on: ubuntu-latest  # Uses Ubuntu as the environment
     steps:
+      # Step 1: Get your code
       - name: Checkout 🛎️
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2    # Downloads your repo content
 
+      # Step 2: Build your frontend
       - name: Install and Build 🔧
         run: |
-          cd frontend
-          npm install
-          npm run build
+          cd frontend              # Go to frontend directory
+          npm install             # Install dependencies
+          npm run build          # Build your React app (creates dist folder)
 
+      # Step 3: Deploy to GitHub Pages
       - name: Deploy 🚀
-        uses: JamesIves/github-pages-deploy-action@v4
+        uses: JamesIves/github-pages-deploy-action@4.1.4  # Uses a pre-made action
         with:
-          folder: frontend/dist
+          branch: gh-pages    # Creates/updates gh-pages branch
+          folder: frontend/dist   # Takes your built files from dist folder
+
+  process-webhook:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch'
+    steps:
+      - name: Process Webhook
+        env:
+          WEBHOOK_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          echo "Received webhook payload:"
+          echo "$WEBHOOK_PAYLOAD"
+          # Add your custom webhook processing logic here
+          # For example, you might want to:
+          # - Validate the webhook source
+          # - Parse the payload
+          # - Trigger specific actions based on the webhook content
