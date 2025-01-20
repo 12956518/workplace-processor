@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from datetime import datetime
 import uvicorn
 import json
@@ -9,6 +10,7 @@ import httpx
 import re
 from typing import List, Dict, Any
 from collections import deque
+import os
 
 # Initialize FastAPI app
 app = FastAPI(title="Workplace Post Processor API")
@@ -27,13 +29,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuration
-VERIFY_TOKEN = "my_test_token_123"
-APP_SECRET = "5285ce95e976c196236079f01b99a446"
-WORKPLACE_ACCESS_TOKEN = "DQWRLN3FEV3RtRU5ZAMWJ2QzRzdDhzRlY0N2EyZAHZAnemNhdXYybnVUT1lmMWtUcTZAhdkdROEMwZAklpcXBBTEVEU2plRklDR2pqZA3ltM3IzUVVxNmpENFJlZAERBUjI0dlp3cEVjQkdaeC1xMl9YRDdlbnpTM1VrYUduejlMeDVXakxyU1dlWlBlUENvWXNhclVabU1zOGg3OEM0VkhMN2IwbkczaUx2U21GT2QyTHJvXzR0QUkyMlFuZAWdQODlPM3pGR01qd2Y4Vl92MEZABOFJrUE5nNAZDZD"
+# Configuration - Use environment variables for sensitive data
+VERIFY_TOKEN = os.environ.get('WORKPLACE_VERIFY_TOKEN', 'my_test_token_123')
+APP_SECRET = os.environ.get('WORKPLACE_APP_SECRET', '5285ce95e976c196236079f01b99a446')
+WORKPLACE_ACCESS_TOKEN = os.environ.get('WORKPLACE_ACCESS_TOKEN', 'DQWRLN3FEV3RtRU5ZAMWJ2QzRzdDhzRlY0N2EyZAHZAnemNhdXYybnVUT1lmMWtUcTZAhdkdROEMwZAklpcXBBTEVEU2plRklDR2pqZA3ltM3IzUVVxNmpENFJlZAERBUjI0dlp3cEVjQkdaeC1xMl9YRDdlbnpTM1VrYUduejlMeDVXakxyU1dlWlBlUENvWXNhclVabU1zOGg3OEM0VkhMN2IwbkczaUx2U21GT2QyTHJvXzR0QUkyMlFuZAWdQODlPM3pGR01qd2Y4Vl92MEZABOFJrUE5nNAZDZD')
+AIRTABLE_WEBHOOK = os.environ.get('AIRTABLE_WEBHOOK', 'https://hooks.airtable.com/workflows/v1/genericWebhook/app7kliNTFQP7pa1K/wflXBEgbGhrtUhwTR/wtrB3LOq85sVgMSm0')
 
 WORKPLACE_GRAPH_API = "https://graph.workplace.com"
-AIRTABLE_WEBHOOK = "https://hooks.airtable.com/workflows/v1/genericWebhook/app7kliNTFQP7pa1K/wflXBEgbGhrtUhwTR/wtrB3LOq85sVgMSm0"
 
 def clean_message_content(message: str) -> str:
     """Clean up message content by extracting original URLs and removing Workplace formatting"""
@@ -115,7 +117,8 @@ async def root():
         "endpoints": {
             "process_post": "/process-post/{post_id}",
             "webhook": "/webhook",
-            "websocket": "/ws"
+            "websocket": "/ws",
+            "verify_webhook": "/verify-webhook"
         },
         "docs": "/docs"
     }
@@ -161,6 +164,29 @@ async def process_post(post_id: str):
         "status": "error",
         "message": "Failed to get post details from Workplace"
     }
+
+@app.post("/verify-webhook")
+async def verify_webhook(request: Request):
+    """Verify the webhook token"""
+    try:
+        data = await request.json()
+        token = data.get('verify_token')
+
+        if token == VERIFY_TOKEN:
+            return JSONResponse({
+                'verified': True,
+                'message': 'Webhook verification successful'
+            })
+        else:
+            return JSONResponse({
+                'verified': False,
+                'message': 'Invalid verification token'
+            }, status_code=400)
+    except Exception as e:
+        return JSONResponse({
+            'verified': False,
+            'message': f'Error during verification: {str(e)}'
+        }, status_code=500)
 
 @app.post("/webhook")
 async def webhook_handler(request: Request):
