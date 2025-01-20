@@ -13,16 +13,17 @@ jobs:
       - name: Checkout 🛎️
         uses: actions/checkout@v2    # Downloads your repo content
 
-# Step 2: Build your frontend and install backend dependencies
-- name: Install and Build 🔧
-  run: |
-    cd frontend              # Go to frontend directory
-    npm install             # Install frontend dependencies
-    npm run build          # Build your React app (creates dist folder)
-    
-    # Install Python dependencies
-    python -m pip install --upgrade pip
-    pip install -r requirements.txt  # You'll need to create this file
+      # Step 2: Build your frontend and install backend dependencies
+      - name: Install and Build 🔧
+        run: |
+          cd frontend              # Go to frontend directory
+          npm install             # Install frontend dependencies
+          npm run build          # Build your React app (creates dist folder)
+          
+          # Install Python dependencies
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt  # You'll need to create this file
+
       # Step 3: Deploy to GitHub Pages
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@4.1.4  # Uses a pre-made action
@@ -30,10 +31,30 @@ jobs:
           branch: gh-pages    # Creates/updates gh-pages branch
           folder: frontend/dist   # Takes your built files from dist folder
 
+      # Step 4: Set up Python and backend dependencies
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      # Step 5: Run backend verification or additional setup
+      - name: Run backend verification
+        env:
+          WORKPLACE_VERIFY_TOKEN: ${{ secrets.WORKPLACE_VERIFY_TOKEN }}
+          WORKPLACE_APP_SECRET: ${{ secrets.WORKPLACE_APP_SECRET }}
+          WORKPLACE_ACCESS_TOKEN: ${{ secrets.WORKPLACE_ACCESS_TOKEN }}
+          AIRTABLE_WEBHOOK: ${{ secrets.AIRTABLE_WEBHOOK }}
+        run: |
+          echo "Backend verification step"
+          # Add any backend verification or setup commands
+
   process-webhook:
     runs-on: ubuntu-latest
     if: github.event_name == 'repository_dispatch'
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
       - name: Process Webhook
         env:
           WEBHOOK_PAYLOAD: ${{ toJson(github.event.client_payload) }}
@@ -41,7 +62,3 @@ jobs:
           echo "Received webhook payload:"
           echo "$WEBHOOK_PAYLOAD"
           # Add your custom webhook processing logic here
-          # For example, you might want to:
-          # - Validate the webhook source
-          # - Parse the payload
-          # - Trigger specific actions based on the webhook content
