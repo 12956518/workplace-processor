@@ -1,6 +1,18 @@
-# Update backend/requirements.txt
-fastapi==0.109.1
-uvicorn[standard]==0.27.0  # This includes websockets
-httpx==0.26.0
-websockets==12.0  # Add this explicitly
-python-dotenv
+# FastAPI and ASGI server
+fastapi==0.110.0
+uvicorn==0.27.1
+
+# HTTP client for async requests
+httpx==0.27.0
+
+# Environment variable management
+python-dotenv==2.0.0
+
+# Additional utilities
+typing-extensions==4.10.0
+
+# Cryptography and security
+cryptography==42.0.2
+
+# Date and time handling
+python-dateutil==2.9.0
